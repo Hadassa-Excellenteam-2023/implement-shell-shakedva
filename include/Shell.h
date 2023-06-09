@@ -19,8 +19,7 @@ private:
     void executeCommand(std::string, std::string);
     void myJobsCommand();
     void checkBackgroundJobs();
-
-//    void sigchld_handler(int);
-//    bool isJobFinished(Job);
+    int openOutputFd(const std::string&);
+    bool validateCommand(const std::string&);
     std::vector <Job> _myJobs;
 };
