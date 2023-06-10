@@ -50,12 +50,7 @@ std::pair<std::string, std::string> Shell::tokenizeCommand(const std::string &co
     if (command.rfind(PATH_BEGINNING, 0) != 0)
         command = PATH_BEGINNING + command;
 
-    // remove the whitespaces in the end.
     commandsVariables = trim(commandsVariables);
-//    std::size_t found = commandsVariables.find_last_not_of(WHITESPACES);
-//    if (found != std::string::npos)
-//        commandsVariables.erase(found + 1);
-
     return std::make_pair(command, commandsVariables);
 }
 
@@ -80,13 +75,6 @@ void Shell::executeCommand(std::string command, std::string commandsVariables) {
             runInBackground = true;
             commandsVariables.pop_back();
         }
-//        std::size_t pos = commandsVariables.find_first_of(IN_REDIRECTION_TOKEN);
-//        if(pos != std::string::npos) {
-//            inputFileName = trim(commandsVariables.substr(pos + 1));
-//            commandsVariables = inputFileName;
-//            redirectIn = true;
-//            fd = openInputFd(inputFileName);
-//        }
         redirectIn = parseInputRedirection(inputFileName, commandsVariables, fd);
         redirectOut = parseOutputRedirection(outputFileName, commandsVariables, fd);
         args[1] = commandsVariables.empty() ? NULL : commandsVariables.data();
@@ -112,9 +100,8 @@ void Shell::executeCommand(std::string command, std::string commandsVariables) {
                 return;
             }
             if(redirectIn && dup2(fd, STDIN_FILENO) < 0){
-                    perror("dup2 err");
-                    return;
-
+                perror("dup2 err");
+                return;
             }
             if (execv(args[0], args) < 0)
                 perror(EXECV_ERR);
@@ -168,7 +155,7 @@ int Shell::openOutputFd(const std::string& outputFileName) {
     int fd = open(outputFileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         perror("open err");
-        exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE); //todo not exit
     }
     return fd;
 }
@@ -191,7 +178,6 @@ bool Shell::parseInputRedirection(std::string& inputFileName, std::string& comma
         fd = openInputFd(inputFileName);
         return true;
     }
-
     return false;
 }
 int Shell::openInputFd(const std::string& inputFileName)
