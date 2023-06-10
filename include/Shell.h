@@ -16,7 +16,7 @@ public:
     Shell();
 private:
     std::vector<std::pair<std::string, std::string>> tokenizeCommands(const std::string&);
-    void executeCommand(std::string, std::string);
+    void executeCommand(const std::vector<std::pair<std::string, std::string>>&);
     void myJobsCommand();
     void checkBackgroundJobs();
     int openOutputFd(const std::string&);
