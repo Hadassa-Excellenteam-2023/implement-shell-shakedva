@@ -18,6 +18,7 @@ const int RUNNING = 0;
 
 const char OUT_REDIRECTION_TOKEN = '>';
 const char IN_REDIRECTION_TOKEN = '<';
+const char PIPE_TOKEN = '|';
 
 /*
  * Constructor that receives commands and their arguments and execute them.
@@ -26,33 +27,37 @@ Shell::Shell() {
     while (true) {
         std::string commandLine;
         std::getline(std::cin, commandLine);
-        std::pair<std::string, std::string> tokenized_result = tokenizeCommand(commandLine);
-
-        std::string command = tokenized_result.first;
-
-        if (command != PATH_BEGINNING)
-            executeCommand(command, tokenized_result.second);
+        std::vector<std::pair<std::string, std::string>> commands = tokenizeCommands(commandLine);
+        //executeCommand(commands);
     }
 }
 
 /*
- * Receives the input from the user and tokenize it into the command and its variables
+ * Receives the input from the user and tokenize it into the executable command and its variables
  */
-std::pair<std::string, std::string> Shell::tokenizeCommand(const std::string &commandLine) {
+std::vector<std::pair<std::string, std::string>> Shell::tokenizeCommands(const std::string &commandLine) {
     std::string command;
-    std::string commandsVariables;
-    std::string token;
-    std::istringstream iss(commandLine);
-    iss >> command;
-    while (iss >> token)
-        commandsVariables += token + " ";
+    std::istringstream commandLineIss(commandLine);
+    std::vector<std::pair<std::string, std::string>> commands;
 
-    if (command.rfind(PATH_BEGINNING, 0) != 0)
-        command = PATH_BEGINNING + command;
+    while (std::getline(commandLineIss, command, PIPE_TOKEN)) {
+        std::string executable, variables;
+        std::istringstream commandIss(command);
+        commandIss >> executable;
+        std::getline(commandIss, variables);
 
-    commandsVariables = trim(commandsVariables);
-    return std::make_pair(command, commandsVariables);
+        commands.emplace_back(addPathBeginning(executable), trim(variables));
+    }
+    return commands;
 }
+
+std::string Shell::addPathBeginning(std::string& s)  {
+    if (s.rfind(PATH_BEGINNING, 0) != 0)
+        s = PATH_BEGINNING + s;
+    return s;
+}
+
+
 
 /*
  * Execute the user's command

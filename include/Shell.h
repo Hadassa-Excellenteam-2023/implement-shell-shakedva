@@ -15,7 +15,7 @@ class Shell
 public:
     Shell();
 private:
-    std::pair<std::string, std::string> tokenizeCommand(const std::string&);
+    std::vector<std::pair<std::string, std::string>> tokenizeCommands(const std::string&);
     void executeCommand(std::string, std::string);
     void myJobsCommand();
     void checkBackgroundJobs();
@@ -25,5 +25,6 @@ private:
     bool parseOutputRedirection(std::string&, std::string&, int &);
     bool parseInputRedirection(std::string&, std::string&, int &);
     std::string trim(const std::string &);
+    static std::string addPathBeginning(std::string&);
     std::vector <Job> _myJobs;
 };
