@@ -17,6 +17,7 @@ const std::string MYJOBS_COMMAND = "myjobs";
 const int RUNNING = 0;
 
 const char OUT_REDIRECTION_TOKEN = '>';
+const char IN_REDIRECTION_TOKEN = '<';
 
 /*
  * Constructor that receives commands and their arguments and execute them.
@@ -50,9 +51,10 @@ std::pair<std::string, std::string> Shell::tokenizeCommand(const std::string &co
         command = PATH_BEGINNING + command;
 
     // remove the whitespaces in the end.
-    std::size_t found = commandsVariables.find_last_not_of(WHITESPACES);
-    if (found != std::string::npos)
-        commandsVariables.erase(found + 1);
+    commandsVariables = trim(commandsVariables);
+//    std::size_t found = commandsVariables.find_last_not_of(WHITESPACES);
+//    if (found != std::string::npos)
+//        commandsVariables.erase(found + 1);
 
     return std::make_pair(command, commandsVariables);
 }
@@ -61,8 +63,9 @@ std::pair<std::string, std::string> Shell::tokenizeCommand(const std::string &co
  * Execute the user's command
  */
 void Shell::executeCommand(std::string command, std::string commandsVariables) {
-    std::string outputFileName;
+    std::string outputFileName, inputFileName;
     bool redirectOut = false;
+    bool redirectIn = false;
     bool runInBackground = false;
     int fd = -1;
     char *args[3];
@@ -77,16 +80,15 @@ void Shell::executeCommand(std::string command, std::string commandsVariables) {
             runInBackground = true;
             commandsVariables.pop_back();
         }
-        // check for redirection token
-        std::size_t pos = commandsVariables.find_first_of(OUT_REDIRECTION_TOKEN);
-        if(pos != std::string::npos) {
-            outputFileName = commandsVariables.substr(pos + 1);
-            commandsVariables = commandsVariables.substr(0, pos);
-            redirectOut = true;
-            fd = openOutputFd(outputFileName);
-        }
-
-
+//        std::size_t pos = commandsVariables.find_first_of(IN_REDIRECTION_TOKEN);
+//        if(pos != std::string::npos) {
+//            inputFileName = trim(commandsVariables.substr(pos + 1));
+//            commandsVariables = inputFileName;
+//            redirectIn = true;
+//            fd = openInputFd(inputFileName);
+//        }
+        redirectIn = parseInputRedirection(inputFileName, commandsVariables, fd);
+        redirectOut = parseOutputRedirection(outputFileName, commandsVariables, fd);
         args[1] = commandsVariables.empty() ? NULL : commandsVariables.data();
     }
     args[2] = NULL;
@@ -105,11 +107,15 @@ void Shell::executeCommand(std::string command, std::string commandsVariables) {
                 return;
             }
 
-            if (redirectOut && dup2(fd, STDOUT_FILENO) < 0) {  // Redirect stdout to the file descriptor
+            if (redirectOut && dup2(fd, STDOUT_FILENO) < 0) {  // Redirect stdout to the fd
                 perror("dup2 err");
-                exit(EXIT_FAILURE);
+                return;
             }
+            if(redirectIn && dup2(fd, STDIN_FILENO) < 0){
+                    perror("dup2 err");
+                    return;
 
+            }
             if (execv(args[0], args) < 0)
                 perror(EXECV_ERR);
         }
@@ -119,7 +125,7 @@ void Shell::executeCommand(std::string command, std::string commandsVariables) {
                 _myJobs.push_back({command, commandsVariables, pid, RUNNING});
             } else {
                 waitpid(pid, NULL, 0);
-                if(redirectOut)
+                if(redirectOut || redirectIn)
                     close(fd);
             }
         }
@@ -147,14 +153,17 @@ bool isJobFinished(Job job) {
  */
 void Shell::checkBackgroundJobs()
 {
-    for (auto it = _myJobs.begin(); it != _myJobs.end(); it++) {
+    for (auto & _myJob : _myJobs) {
         int status = 0;
-        pid_t result = waitpid(it->pid, &status, WNOHANG);
-        it->status = result;
+        pid_t result = waitpid(_myJob.pid, &status, WNOHANG);
+        _myJob.status = result;
     }
     _myJobs.erase(std::remove_if(_myJobs.begin(), _myJobs.end(), isJobFinished), _myJobs.end());
 }
 
+bool Shell::validateCommand(const std::string& command) {
+    return access(command.c_str(), F_OK) == 0;
+}
 int Shell::openOutputFd(const std::string& outputFileName) {
     int fd = open(outputFileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
@@ -164,8 +173,51 @@ int Shell::openOutputFd(const std::string& outputFileName) {
     return fd;
 }
 
-bool Shell::validateCommand(const std::string& command) {
-    return access(command.c_str(), F_OK) == 0;
+bool Shell::parseOutputRedirection(std::string& outputFileName, std::string &commandsVariables, int& fd) {
+    std::size_t pos = commandsVariables.find_first_of(OUT_REDIRECTION_TOKEN);
+    if(pos != std::string::npos) {
+        outputFileName = trim(commandsVariables.substr(pos + 1));
+        commandsVariables = trim(commandsVariables.substr(0, pos));
+        fd = openOutputFd(outputFileName);
+        return true;
+    }
+    return false;
+}
+bool Shell::parseInputRedirection(std::string& inputFileName, std::string& commandsVariables, int& fd) {
+    std::size_t pos = commandsVariables.find_first_of(IN_REDIRECTION_TOKEN);
+    if(pos != std::string::npos) {
+        inputFileName = trim(commandsVariables.substr(pos + 1));
+        commandsVariables = inputFileName;
+        fd = openInputFd(inputFileName);
+        return true;
+    }
+
+    return false;
+}
+int Shell::openInputFd(const std::string& inputFileName)
+{
+    int fd = open(inputFileName.c_str(), O_RDONLY);
+    if (fd < 0) {
+        perror("open err");
+        exit(EXIT_FAILURE);
+    }
+    return fd;
+}
+
+std::string ltrim(const std::string &s)
+{
+    size_t start = s.find_first_not_of(WHITESPACES);
+    return (start == std::string::npos) ? "" : s.substr(start);
+}
+
+std::string rtrim(const std::string &s)
+{
+    size_t end = s.find_last_not_of(WHITESPACES);
+    return (end == std::string::npos) ? "" : s.substr(0, end + 1);
+}
+// Taken from https://www.techiedelight.com/
+std::string Shell::trim(const std::string &s) {
+    return rtrim(ltrim(s));
 }
 
 

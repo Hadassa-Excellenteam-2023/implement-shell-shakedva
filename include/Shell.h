@@ -20,6 +20,10 @@ private:
     void myJobsCommand();
     void checkBackgroundJobs();
     int openOutputFd(const std::string&);
+    int openInputFd(const std::string&);
     bool validateCommand(const std::string&);
+    bool parseOutputRedirection(std::string&, std::string&, int &);
+    bool parseInputRedirection(std::string&, std::string&, int &);
+    std::string trim(const std::string &);
     std::vector <Job> _myJobs;
 };
