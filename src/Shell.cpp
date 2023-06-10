@@ -51,7 +51,7 @@ std::vector<std::pair<std::string, std::string>> Shell::tokenizeCommands(const s
     return commands;
 }
 
-std::string Shell::addPathBeginning(std::string& s)  {
+std::string Shell::addPathBeginning(std::string &s) {
     if (s.rfind(PATH_BEGINNING, 0) != 0)
         s = PATH_BEGINNING + s;
     return s;
@@ -60,10 +60,10 @@ std::string Shell::addPathBeginning(std::string& s)  {
 /*
  * Execute the user's command
  */
-void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>>& commands) {
-    if(commands.empty())
+void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>> &commands) {
+    if (commands.empty())
         return;
-    else if (commands.size() == 1){
+    else if (commands.size() == 1) {
         std::string command = commands[0].first;
         std::string commandsVariables = commands[0].second;
 
@@ -74,13 +74,11 @@ void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>
         int fd = -1;
         char *args[3];
         args[0] = command.data();
-        if(commandsVariables.empty())
+        if (commandsVariables.empty())
             args[1] = NULL;
 
-        else
-        {
-            if(commandsVariables.back() == BG_TOKEN)
-            {
+        else {
+            if (commandsVariables.back() == BG_TOKEN) {
                 runInBackground = true;
                 commandsVariables.pop_back();
             }
@@ -99,7 +97,7 @@ void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>
 
             else if (pid == 0) // child process
             {
-                if(!validateCommand(command)) {
+                if (!validateCommand(command)) {
                     std::cout << command << COMMAND_NOT_FOUND << std::endl;
                     return;
                 }
@@ -108,41 +106,38 @@ void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>
                     perror("dup2 err");
                     return;
                 }
-                if(redirectIn && dup2(fd, STDIN_FILENO) < 0){
+                if (redirectIn && dup2(fd, STDIN_FILENO) < 0) {
                     perror("dup2 err");
                     return;
                 }
+
                 if (execv(args[0], args) < 0)
                     perror(EXECV_ERR);
-            }
-            else // parent process
+            } else // parent process
             {
                 if (runInBackground) {
                     _myJobs.push_back({command, commandsVariables, pid, RUNNING});
                 } else {
                     waitpid(pid, NULL, 0);
-                    if(redirectOut || redirectIn)
+                    if (redirectOut || redirectIn)
                         close(fd);
                 }
             }
 
         }
-    }
-    else{
+    } else {
         std::string outputFileName, inputFileName;
         bool runInBackground = false;
         int fd[2], in = 0, out = 1;
         char *args[3];
-        for(size_t i = 0; i < commands.size()-1; i++)
-        {
+        for (size_t i = 0; i < commands.size(); i++) {
             std::string command = commands[i].first;
             std::string commandsVariables = commands[i].second;
             args[0] = command.data();
 
-            if(commandsVariables.empty())
+            if (commandsVariables.empty())
                 args[1] = NULL;
-            else
-            {
+            else {
 //                redirectIn = parseInputRedirection(inputFileName, commandsVariables, fd[PIPE_READ]);
 //                redirectOut = parseOutputRedirection(outputFileName, commandsVariables, fd[PIPE_WRITE]);
                 args[1] = commandsVariables.empty() ? NULL : commandsVariables.data();
@@ -152,44 +147,50 @@ void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>
                 myJobsCommand();
 
             else {
+                pipe(fd);
                 pid_t pid = fork();
                 if (pid < 0) // can not fork
                     perror(FORK_ERR);
                 else if (pid == 0) // child process
                 {
-                    if(!validateCommand(command)) {
+                    if (!validateCommand(command)) {
                         std::cout << command << COMMAND_NOT_FOUND << std::endl;
                         return;
                     }
-                    pipe(fd);
-                    if (in != 0)
-                    {
-                        dup2 (in, 0); // direct stdin to in (from 2nd command)
-                        close (in);
-                    }
-                    // not include the last
-                    if(dup2(fd[1], STDOUT_FILENO) < 0) {  // Redirect stdout to the fd
-                        perror("dup2 err");
-                        return;
+
+                    if (in != 0) {
+                        dup2(in, 0); // direct stdin to in (from 2nd command)
+                        close(in);
                     }
 
+                    if (i == commands.size() - 1) {
+                        if (dup2(1, STDOUT_FILENO) < 0) {  // Redirect stdout to the stdout
+                            perror("dup2 err");
+                            return;
+                        }
+                    }
+                        // not include the last
+                    else {
+                        if (dup2(fd[1], STDOUT_FILENO) < 0) {  // Redirect stdout to the fd
+                            perror("dup2 err");
+                            return;
+                        }
+                    }
 //                    dup2 (fd[1], 1);
-                   close (out);
+//                   close (out);
 
                     if (execv(args[0], args) < 0)
                         perror(EXECV_ERR);
-                }
-                else // parent process
+                } else // parent process
                 {
                     waitpid(pid, NULL, 0);
-                    close (fd[1]); // close the out file
+                    close(fd[1]); // close the out file
                     in = fd[0];
                 }
-
             }
 
-        }
 
+        }
 
 
     }
@@ -205,18 +206,19 @@ void Shell::myJobsCommand() {
         std::cout << job.pid << job.command << " " << job.commandsVariables << " " << job.status << std::endl;
     }
 }
+
 /*
  * Check if a background job is finished
  */
 bool isJobFinished(Job job) {
     return job.status != 0;
 }
+
 /*
  * Updates the data structure that holds all the background jobs.
  */
-void Shell::checkBackgroundJobs()
-{
-    for (auto & _myJob : _myJobs) {
+void Shell::checkBackgroundJobs() {
+    for (auto &_myJob: _myJobs) {
         int status = 0;
         pid_t result = waitpid(_myJob.pid, &status, WNOHANG);
         _myJob.status = result;
@@ -224,10 +226,11 @@ void Shell::checkBackgroundJobs()
     _myJobs.erase(std::remove_if(_myJobs.begin(), _myJobs.end(), isJobFinished), _myJobs.end());
 }
 
-bool Shell::validateCommand(const std::string& command) {
+bool Shell::validateCommand(const std::string &command) {
     return access(command.c_str(), F_OK) == 0;
 }
-int Shell::openOutputFd(const std::string& outputFileName) {
+
+int Shell::openOutputFd(const std::string &outputFileName) {
     int fd = open(outputFileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         perror("open err");
@@ -236,9 +239,9 @@ int Shell::openOutputFd(const std::string& outputFileName) {
     return fd;
 }
 
-bool Shell::parseOutputRedirection(std::string& outputFileName, std::string &commandsVariables, int& fd) {
+bool Shell::parseOutputRedirection(std::string &outputFileName, std::string &commandsVariables, int &fd) {
     std::size_t pos = commandsVariables.find_first_of(OUT_REDIRECTION_TOKEN);
-    if(pos != std::string::npos) {
+    if (pos != std::string::npos) {
         outputFileName = trim(commandsVariables.substr(pos + 1));
         commandsVariables = trim(commandsVariables.substr(0, pos));
         fd = openOutputFd(outputFileName);
@@ -246,9 +249,10 @@ bool Shell::parseOutputRedirection(std::string& outputFileName, std::string &com
     }
     return false;
 }
-bool Shell::parseInputRedirection(std::string& inputFileName, std::string& commandsVariables, int& fd) {
+
+bool Shell::parseInputRedirection(std::string &inputFileName, std::string &commandsVariables, int &fd) {
     std::size_t pos = commandsVariables.find_first_of(IN_REDIRECTION_TOKEN);
-    if(pos != std::string::npos) {
+    if (pos != std::string::npos) {
         inputFileName = trim(commandsVariables.substr(pos + 1));
         commandsVariables = inputFileName;
         fd = openInputFd(inputFileName);
@@ -256,8 +260,8 @@ bool Shell::parseInputRedirection(std::string& inputFileName, std::string& comma
     }
     return false;
 }
-int Shell::openInputFd(const std::string& inputFileName)
-{
+
+int Shell::openInputFd(const std::string &inputFileName) {
     int fd = open(inputFileName.c_str(), O_RDONLY);
     if (fd < 0) {
         perror("open err");
@@ -266,17 +270,16 @@ int Shell::openInputFd(const std::string& inputFileName)
     return fd;
 }
 
-std::string ltrim(const std::string &s)
-{
+std::string ltrim(const std::string &s) {
     size_t start = s.find_first_not_of(WHITESPACES);
     return (start == std::string::npos) ? "" : s.substr(start);
 }
 
-std::string rtrim(const std::string &s)
-{
+std::string rtrim(const std::string &s) {
     size_t end = s.find_last_not_of(WHITESPACES);
     return (end == std::string::npos) ? "" : s.substr(0, end + 1);
 }
+
 // Taken from https://www.techiedelight.com/
 std::string Shell::trim(const std::string &s) {
     return rtrim(ltrim(s));
