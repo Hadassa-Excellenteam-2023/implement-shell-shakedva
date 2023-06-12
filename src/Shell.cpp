@@ -11,14 +11,17 @@ const std::string PATH_BEGINNING = "/bin/";
 const char *FORK_ERR = "fork failed";
 const char *EXECV_ERR = "execv failed";
 const char *COMMAND_NOT_FOUND = ": command not found";
-const char BG_TOKEN = '&';
+const char *DUP2_ERR = "dup2 err";
 const std::string WHITESPACES(" \t\f\v\n\r");
 const std::string MYJOBS_COMMAND = "myjobs";
 const int RUNNING = 0;
-
+const int EXECV_LEN = 3;
+const char BG_TOKEN = '&';
 const char OUT_REDIRECTION_TOKEN = '>';
 const char IN_REDIRECTION_TOKEN = '<';
 const char PIPE_TOKEN = '|';
+const int PIPE_READ = 0;
+const int PIPE_WRITE = 1;
 
 /*
  * Constructor that receives commands and their arguments and execute them.
@@ -51,6 +54,9 @@ std::vector<std::pair<std::string, std::string>> Shell::tokenizeCommands(const s
     return commands;
 }
 
+/*
+ * Adds beginning to each command
+ */
 std::string Shell::addPathBeginning(std::string &s) {
     if (s.rfind(PATH_BEGINNING, 0) != 0)
         s = PATH_BEGINNING + s;
@@ -63,15 +69,17 @@ std::string Shell::addPathBeginning(std::string &s) {
 void Shell::executeCommand(std::vector<std::pair<std::string, std::string>> &commands) {
     if (commands.empty())
         return;
-
     std::string outputFileName, inputFileName;
     bool runInBackground = isBackgroundJob(commands);
-    bool redirectIn = false, redirectOut = false;
-    int fd[2], in = 0, out = 1;
-    int redirectionFd = -1;
-    char *args[3];
+    int fd[2];
+    int input_descriptor = 0;
+    char *args[EXECV_LEN];
 
     for (size_t i = 0; i < commands.size(); i++) {
+        bool redirectIn = false;
+        bool redirectOut = false;
+        int redirectionFd;
+
         std::string command = commands[i].first;
         std::string commandsVariables = commands[i].second;
         args[0] = command.data();
@@ -84,61 +92,58 @@ void Shell::executeCommand(std::vector<std::pair<std::string, std::string>> &com
             args[1] = commandsVariables.empty() ? NULL : commandsVariables.data();
         }
         args[2] = NULL;
-        if (command == PATH_BEGINNING + MYJOBS_COMMAND)
+        if (command == PATH_BEGINNING + MYJOBS_COMMAND) {
             myJobsCommand();
+            return;
+        }
 
-        else {
-            pipe(fd);
-            pid_t pid = fork();
-            if (pid < 0) // can not fork
-                perror(FORK_ERR);
-            else if (pid == 0) // child process
-            {
-                if (!validateCommand(command)) {
-                    std::cout << command << COMMAND_NOT_FOUND << std::endl;
+        pipe(fd);
+        pid_t pid = fork();
+        if (pid < 0) // can not fork
+            perror(FORK_ERR);
+        else if (pid == 0) // child process
+        {
+            if (!validateCommand(command)) {
+                std::cout << command << COMMAND_NOT_FOUND << std::endl;
+                return;
+            }
+            // read from input file descriptor
+            // stdin for first command and pipes for the rest
+            if (input_descriptor != 0) {
+                if(dup2(input_descriptor, STDIN_FILENO) < 0) {
+                    perror(DUP2_ERR);
                     return;
                 }
+                close(input_descriptor);
+            }
 
-                if (in != 0) {
-                    dup2(in, 0); // direct stdin to in (from 2nd command)
-                    close(in);
+            // check the file descriptor of the last command in the pipe
+            if (i == commands.size() - 1)
+                handleFdOfLastCommandInPipe(redirectOut, redirectIn, redirectionFd);
+            else {
+                // pipes write into the file descriptor PIPE_WRITE
+                if (dup2(fd[PIPE_WRITE], STDOUT_FILENO) < 0) {
+                    perror(DUP2_ERR);
+                    return;
                 }
-
-                if (i == commands.size() - 1) { // the last command
-                    if (redirectOut &&
-                        dup2(redirectionFd, STDOUT_FILENO) < 0) {  // Redirect stdout to the redirection fd
-                        perror("dup2 err");
-                        return;
-                    }
-                    if (redirectIn && dup2(redirectionFd, STDIN_FILENO) < 0) {
-                        perror("dup2 err");
-                        return;
-                    }
-                    if (dup2(1, STDOUT_FILENO) < 0) {  // Redirect stdout to the stdout in case of piping
-                        perror("dup2 err");
-                        return;
-                    }
-                } else {
-                    if (dup2(fd[1], STDOUT_FILENO) < 0) {  // Redirect stdout to the fd
-                        perror("dup2 err");
-                        return;
-                    }
-                }
-                if (execv(args[0], args) < 0)
-                    perror(EXECV_ERR);
-            } else // parent process
-            {
+            }
+            if (execv(args[0], args) < 0)
+                perror(EXECV_ERR);
+        }
+        else // parent process
+        {
+            if (runInBackground && commands.size() == 1) {
+                _myJobs.push_back({command, commandsVariables, pid, RUNNING});
+            } else {
                 waitpid(pid, NULL, 0);
-
-                close(fd[1]); // close the out file
-                in = fd[0];
+                close(fd[PIPE_WRITE]); // close the out file
+                input_descriptor = fd[PIPE_READ];
                 if (redirectIn || redirectOut)
                     close(redirectionFd);
             }
         }
     }
 }
-
 /*
  * Allows the user to see all the current processes that are working in the background and their information
  */
@@ -153,7 +158,7 @@ void Shell::myJobsCommand() {
  * Check if a background job is finished
  */
 bool isJobFinished(Job job) {
-    return job.status != 0;
+    return job.status != RUNNING;
 }
 
 /*
@@ -168,10 +173,17 @@ void Shell::checkBackgroundJobs() {
     _myJobs.erase(std::remove_if(_myJobs.begin(), _myJobs.end(), isJobFinished), _myJobs.end());
 }
 
+/*
+ * Returns whether the command exist
+ */
 bool Shell::validateCommand(const std::string &command) {
     return access(command.c_str(), F_OK) == 0;
 }
 
+/*
+ * Opens output file descriptor for reading, writing.
+ * Overwrite the file from the beginning
+ */
 int Shell::openOutputFd(const std::string &outputFileName) {
     int fd = open(outputFileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
@@ -180,7 +192,9 @@ int Shell::openOutputFd(const std::string &outputFileName) {
     }
     return fd;
 }
-
+/*
+ * Checks if there is an output redirection, and if so divides the variables into the requested file name and variables.
+ */
 bool Shell::parseOutputRedirection(std::string &outputFileName, std::string &commandsVariables, int &fd) {
     std::size_t pos = commandsVariables.find_first_of(OUT_REDIRECTION_TOKEN);
     if (pos != std::string::npos) {
@@ -191,7 +205,9 @@ bool Shell::parseOutputRedirection(std::string &outputFileName, std::string &com
     }
     return false;
 }
-
+/*
+ * Checks if there is an input redirection, and if so divides the variables into the requested file name and variables.
+ */
 bool Shell::parseInputRedirection(std::string &inputFileName, std::string &commandsVariables, int &fd) {
     std::size_t pos = commandsVariables.find_first_of(IN_REDIRECTION_TOKEN);
     if (pos != std::string::npos) {
@@ -203,6 +219,9 @@ bool Shell::parseInputRedirection(std::string &inputFileName, std::string &comma
     return false;
 }
 
+/*
+ * Opens input file descriptor
+ */
 int Shell::openInputFd(const std::string &inputFileName) {
     int fd = open(inputFileName.c_str(), O_RDONLY);
     if (fd < 0) {
@@ -211,29 +230,62 @@ int Shell::openInputFd(const std::string &inputFileName) {
     }
     return fd;
 }
-
+/*
+ * Trims trailing whitespaces
+ */
 std::string ltrim(const std::string &s) {
     size_t start = s.find_first_not_of(WHITESPACES);
     return (start == std::string::npos) ? "" : s.substr(start);
 }
 
+/*
+ * Trims leading whitespaces
+ */
 std::string rtrim(const std::string &s) {
     size_t end = s.find_last_not_of(WHITESPACES);
     return (end == std::string::npos) ? "" : s.substr(0, end + 1);
 }
 
-// Taken from https://www.techiedelight.com/
+/*
+ * Trims leading and trailing whitespaces
+ * Taken from https://www.techiedelight.com/
+ */
 std::string Shell::trim(const std::string &s) {
     return rtrim(ltrim(s));
 }
-
-bool Shell::isBackgroundJob(std::vector<std::pair<std::string, std::string>>& commands) {
-    if(!commands.empty() && commands.back().second.back() == BG_TOKEN)
-    {
+/*
+ * Returns if the user requested for a background job
+ */
+bool Shell::isBackgroundJob(std::vector<std::pair<std::string, std::string>> &commands) {
+    if (!commands.empty() && commands.back().second.back() == BG_TOKEN) {
         commands.back().second.pop_back();
+        commands.back().second = trim(commands.back().second);
         return true;
     }
     return false;
+}
+/*
+ * The last command in pipe can be directed out to standard output or to another file descriptor, or an input from
+ * a file descriptor.
+ */
+void Shell::handleFdOfLastCommandInPipe(bool redirectOut, bool redirectIn, int redirectionFd) {
+
+    // direct out to redirection file descriptor
+    if (redirectOut &&
+        dup2(redirectionFd, STDOUT_FILENO) < 0) {
+        perror(DUP2_ERR);
+        return;
+    }
+    // direct input from file descriptor
+    if (redirectIn && dup2(redirectionFd, STDIN_FILENO) < 0) {
+        perror(DUP2_ERR);
+        return;
+    }
+    // direct out to standard output
+    if (dup2(STDOUT_FILENO, STDOUT_FILENO) < 0) {
+        perror(DUP2_ERR);
+        return;
+    }
 }
 
 

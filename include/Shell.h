@@ -25,6 +25,7 @@ private:
     bool validateCommand(const std::string&);
     bool parseOutputRedirection(std::string&, std::string&, int &);
     bool parseInputRedirection(std::string&, std::string&, int &);
+    void handleFdOfLastCommandInPipe(bool, bool, int);
     std::string trim(const std::string &);
     static std::string addPathBeginning(std::string&);
     std::vector <Job> _myJobs;
