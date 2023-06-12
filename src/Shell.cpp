@@ -63,27 +63,29 @@ std::string Shell::addPathBeginning(std::string &s) {
 void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>> &commands) {
     if (commands.empty())
         return;
-    else if (commands.size() == 1) {
-        std::string command = commands[0].first;
-        std::string commandsVariables = commands[0].second;
 
-        std::string outputFileName, inputFileName;
-        bool redirectOut = false;
-        bool redirectIn = false;
-        bool runInBackground = false;
-        int fd = -1;
-        char *args[3];
+    std::string outputFileName, inputFileName;
+    bool runInBackground = false;
+    bool redirectIn = false, redirectOut = false;
+    int fd[2], in = 0, out = 1;
+    int redirectionFd = -1;
+    char *args[3];
+
+//        if (commandsVariables.back() == BG_TOKEN) {
+//                runInBackground = true;
+//                commandsVariables.pop_back();
+//        }
+
+    for (size_t i = 0; i < commands.size(); i++) {
+        std::string command = commands[i].first;
+        std::string commandsVariables = commands[i].second;
         args[0] = command.data();
+
         if (commandsVariables.empty())
             args[1] = NULL;
-
         else {
-            if (commandsVariables.back() == BG_TOKEN) {
-                runInBackground = true;
-                commandsVariables.pop_back();
-            }
-            redirectIn = parseInputRedirection(inputFileName, commandsVariables, fd);
-            redirectOut = parseOutputRedirection(outputFileName, commandsVariables, fd);
+            redirectIn = parseInputRedirection(inputFileName, commandsVariables, redirectionFd);
+            redirectOut = parseOutputRedirection(outputFileName, commandsVariables, redirectionFd);
             args[1] = commandsVariables.empty() ? NULL : commandsVariables.data();
         }
         args[2] = NULL;
@@ -91,10 +93,10 @@ void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>
             myJobsCommand();
 
         else {
+            pipe(fd);
             pid_t pid = fork();
             if (pid < 0) // can not fork
                 perror(FORK_ERR);
-
             else if (pid == 0) // child process
             {
                 if (!validateCommand(command)) {
@@ -102,99 +104,45 @@ void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>
                     return;
                 }
 
-                if (redirectOut && dup2(fd, STDOUT_FILENO) < 0) {  // Redirect stdout to the fd
-                    perror("dup2 err");
-                    return;
-                }
-                if (redirectIn && dup2(fd, STDIN_FILENO) < 0) {
-                    perror("dup2 err");
-                    return;
+                if (in != 0) {
+                    dup2(in, 0); // direct stdin to in (from 2nd command)
+                    close(in);
                 }
 
+                if (i == commands.size() - 1) { // the last command
+                    if (redirectOut &&
+                        dup2(redirectionFd, STDOUT_FILENO) < 0) {  // Redirect stdout to the redirection fd
+                        perror("dup2 err");
+                        return;
+                    }
+                    if (redirectIn && dup2(redirectionFd, STDIN_FILENO) < 0) {
+                        perror("dup2 err");
+                        return;
+                    }
+                    if (dup2(1, STDOUT_FILENO) < 0) {  // Redirect stdout to the stdout in case of piping
+                        perror("dup2 err");
+                        return;
+                    }
+                } else {
+                    if (dup2(fd[1], STDOUT_FILENO) < 0) {  // Redirect stdout to the fd
+                        perror("dup2 err");
+                        return;
+                    }
+                }
                 if (execv(args[0], args) < 0)
                     perror(EXECV_ERR);
             } else // parent process
             {
-                if (runInBackground) {
-                    _myJobs.push_back({command, commandsVariables, pid, RUNNING});
-                } else {
-                    waitpid(pid, NULL, 0);
-                    if (redirectOut || redirectIn)
-                        close(fd);
-                }
-            }
 
+                waitpid(pid, NULL, 0);
+                close(fd[1]); // close the out file
+                in = fd[0];
+                if (redirectIn || redirectOut)
+                    close(redirectionFd);
+
+            }
         }
-    } else {
-        std::string outputFileName, inputFileName;
-        bool runInBackground = false;
-        int fd[2], in = 0, out = 1;
-        char *args[3];
-        for (size_t i = 0; i < commands.size(); i++) {
-            std::string command = commands[i].first;
-            std::string commandsVariables = commands[i].second;
-            args[0] = command.data();
-
-            if (commandsVariables.empty())
-                args[1] = NULL;
-            else {
-//                redirectIn = parseInputRedirection(inputFileName, commandsVariables, fd[PIPE_READ]);
-//                redirectOut = parseOutputRedirection(outputFileName, commandsVariables, fd[PIPE_WRITE]);
-                args[1] = commandsVariables.empty() ? NULL : commandsVariables.data();
-            }
-            args[2] = NULL;
-            if (command == PATH_BEGINNING + MYJOBS_COMMAND)
-                myJobsCommand();
-
-            else {
-                pipe(fd);
-                pid_t pid = fork();
-                if (pid < 0) // can not fork
-                    perror(FORK_ERR);
-                else if (pid == 0) // child process
-                {
-                    if (!validateCommand(command)) {
-                        std::cout << command << COMMAND_NOT_FOUND << std::endl;
-                        return;
-                    }
-
-                    if (in != 0) {
-                        dup2(in, 0); // direct stdin to in (from 2nd command)
-                        close(in);
-                    }
-
-                    if (i == commands.size() - 1) {
-                        if (dup2(1, STDOUT_FILENO) < 0) {  // Redirect stdout to the stdout
-                            perror("dup2 err");
-                            return;
-                        }
-                    }
-                        // not include the last
-                    else {
-                        if (dup2(fd[1], STDOUT_FILENO) < 0) {  // Redirect stdout to the fd
-                            perror("dup2 err");
-                            return;
-                        }
-                    }
-//                    dup2 (fd[1], 1);
-//                   close (out);
-
-                    if (execv(args[0], args) < 0)
-                        perror(EXECV_ERR);
-                } else // parent process
-                {
-                    waitpid(pid, NULL, 0);
-                    close(fd[1]); // close the out file
-                    in = fd[0];
-                }
-            }
-
-
-        }
-
-
     }
-
 }
 
 /*
