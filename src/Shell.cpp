@@ -60,21 +60,16 @@ std::string Shell::addPathBeginning(std::string &s) {
 /*
  * Execute the user's command
  */
-void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>> &commands) {
+void Shell::executeCommand(std::vector<std::pair<std::string, std::string>> &commands) {
     if (commands.empty())
         return;
 
     std::string outputFileName, inputFileName;
-    bool runInBackground = false;
+    bool runInBackground = isBackgroundJob(commands);
     bool redirectIn = false, redirectOut = false;
     int fd[2], in = 0, out = 1;
     int redirectionFd = -1;
     char *args[3];
-
-//        if (commandsVariables.back() == BG_TOKEN) {
-//                runInBackground = true;
-//                commandsVariables.pop_back();
-//        }
 
     for (size_t i = 0; i < commands.size(); i++) {
         std::string command = commands[i].first;
@@ -133,13 +128,12 @@ void Shell::executeCommand(const std::vector<std::pair<std::string, std::string>
                     perror(EXECV_ERR);
             } else // parent process
             {
-
                 waitpid(pid, NULL, 0);
+
                 close(fd[1]); // close the out file
                 in = fd[0];
                 if (redirectIn || redirectOut)
                     close(redirectionFd);
-
             }
         }
     }
@@ -231,6 +225,15 @@ std::string rtrim(const std::string &s) {
 // Taken from https://www.techiedelight.com/
 std::string Shell::trim(const std::string &s) {
     return rtrim(ltrim(s));
+}
+
+bool Shell::isBackgroundJob(std::vector<std::pair<std::string, std::string>>& commands) {
+    if(!commands.empty() && commands.back().second.back() == BG_TOKEN)
+    {
+        commands.back().second.pop_back();
+        return true;
+    }
+    return false;
 }
 
 

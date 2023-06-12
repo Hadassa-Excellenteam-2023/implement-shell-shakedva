@@ -16,9 +16,10 @@ public:
     Shell();
 private:
     std::vector<std::pair<std::string, std::string>> tokenizeCommands(const std::string&);
-    void executeCommand(const std::vector<std::pair<std::string, std::string>>&);
+    void executeCommand(std::vector<std::pair<std::string, std::string>>&);
     void myJobsCommand();
     void checkBackgroundJobs();
+    bool isBackgroundJob(std::vector<std::pair<std::string, std::string>>&);
     int openOutputFd(const std::string&);
     int openInputFd(const std::string&);
     bool validateCommand(const std::string&);
